@@ -1,2 +1,4 @@
 # Refer to all C routines by their name prefixed by C_
 useDynLib(simplemmap, .registration = TRUE, .fixes = "C_")
+
+export(mmap)
