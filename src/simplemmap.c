@@ -352,6 +352,11 @@ SEXP do_mmap_file(SEXP args)
     return mmap_file(file, type, ptrOK, wrtOK);
 }
 
+static const R_ExternalMethodDef ExtEntries[] = {
+    {"mmap_file", (DL_FUNC) &do_mmap_file, -1},
+    {NULL, NULL, 0}
+};
+
 void R_init_simplemmap(DllInfo *info)
 {
     mmap_list = CONS(R_NilValue, R_NilValue);
@@ -359,6 +364,8 @@ void R_init_simplemmap(DllInfo *info)
     
     InitMmapIntegerClass(info);
     InitMmapRealClass(info);
+
+    R_registerRoutines(info, NULL, NULL, NULL, ExtEntries);
 }
 
 void R_unload_simplemmap(DllInfo *info)
