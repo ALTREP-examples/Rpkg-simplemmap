@@ -334,12 +334,15 @@ SEXP do_mmap_file(SEXP args)
     SEXP sptrOK = CADDR(args);
     SEXP swrtOK = CADDDR(args);
 
-    int type = INTSXP;
+    int type;
     if (stype != R_NilValue) {
 	const char *typestr = CHAR(asChar(stype));
 	if (strcmp(typestr, "double") == 0)
 	    type = REALSXP;
-	else if (strcmp(typestr, "integer") != 0)
+	else if (strcmp(typestr, "integer") == 0 ||
+		 strcmp(typestr, "int") == 0)
+	    type = INTSXP;
+	else
 	    error("type '%s' is not supported", typestr);
     }    
 
