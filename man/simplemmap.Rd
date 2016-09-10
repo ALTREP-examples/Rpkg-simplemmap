@@ -29,16 +29,12 @@ mmap(filename, type = c("double", "integer", "int"), ptrOK = FALSE, wrtOK = FALS
 }
 
 \examples{
-##---- Should be DIRECTLY executable !! ----
-##-- ==>  Define data, use random,
-##--	or do  help(data=index)  for the standard data sets.
-
-## The function is currently defined as
-function (filename, type = c("double", "integer", "int"), ptrOK = FALSE, 
-    wrtOK = FALSE) 
-{
-    type = match.arg(type)
-    .External(C_mmap_file, filename, type, ptrOK, wrtOK)
-  }
+tmp <- tempfile()
+x <- runif(1000)
+writeBin(x, tmp)
+y <- mmap(tmp)
+head(x)
+head(y)
+unlink(tmp)
 }
 \keyword{file}
