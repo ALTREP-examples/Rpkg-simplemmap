@@ -1,0 +1,9 @@
+Package: simplemmap
+Title: Simple Mamory-Mapped Vectors
+Version: 0.0-0
+Author: Luke Tierney
+Description: A simple implementation of memory-mapped vectors to illustrate
+  the ALTREP framework.
+Maintainer: Luke Tierney <luke-tierney@uiowa.edu>
+License: GPL
+ByteCompile: yes
