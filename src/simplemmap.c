@@ -234,12 +234,6 @@ static void finalize_mmap_objects()
     R_ReleaseObject(mmap_list);
 }
 
-static Rboolean asLogicalNA(SEXP x, Rboolean dflt)
-{
-    Rboolean val = asLogical(x);
-    return val == NA_LOGICAL ? dflt : val;
-}
-
 #ifdef Win32
 # error "I'm sure this needs adjusting for Windows, so punt for now."
 #else
@@ -329,6 +323,12 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
 }
 #endif
 
+static Rboolean asLogicalNA(SEXP x, Rboolean dflt)
+{
+    Rboolean val = asLogical(x);
+    return val == NA_LOGICAL ? dflt : val;
+}
+
 SEXP do_mmap_file(SEXP args)
 {
     args = CDR(args);
@@ -337,7 +337,7 @@ SEXP do_mmap_file(SEXP args)
     SEXP sptrOK = CADDR(args);
     SEXP swrtOK = CADDDR(args);
 
-    int type;
+    int type = 0;
     if (stype != R_NilValue) {
 	const char *typestr = CHAR(asChar(stype));
 	if (strcmp(typestr, "double") == 0)
