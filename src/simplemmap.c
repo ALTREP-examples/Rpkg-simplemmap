@@ -22,8 +22,8 @@ typedef struct {
     Rboolean wrtOK;
 } mmap_info_t;
 
-#define MMAP_EPTR(x) CAR(x)
-#define MMAP_INFO(x) CDR(x)
+#define MMAP_EPTR(x) R_altrep_data1(x)
+#define MMAP_INFO(x) R_altrep_data2(x)
 
 static R_INLINE void *MMAP_ADDR(SEXP x)
 {
@@ -249,7 +249,8 @@ static void register_mmap_eptr(SEXP eptr)
     SETCDR(mmap_list, 
 	   CONS(R_MakeWeakRefC(eptr, R_NilValue, mmap_finalize, TRUE),
 		CDR(mmap_list)));
-    
+    /* store the weak reference for unmapping */
+    R_SetExternalPtrTag(eptr, CAR(CDR(mmap_list)));
 }
 
 static void finalize_mmap_objects()
@@ -290,7 +291,7 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
     INTEGER(dinfo)[1] = ptrOK;
     INTEGER(dinfo)[2] = wrtOK;
     SETCDR(CDR(data), CONS(dinfo, R_NilValue));
-    SEXP eptr = PROTECT(R_MakeExternalPtr(p, install("mmap"), data));
+    SEXP eptr = PROTECT(R_MakeExternalPtr(p, R_NilValue, data));
     SEXP info = PROTECT(allocVector(RAWSXP, sizeof(mmap_info_t)));
     mmap_info_t *pi = DATAPTR(info);
     pi->ptrOK = ptrOK;
@@ -355,8 +356,29 @@ SEXP do_mmap_file(SEXP args)
     return mmap_file(file, type, ptrOK, wrtOK);
 }
 
+SEXP do_munmap_file(SEXP args)
+{
+    args = CDR(args);
+    SEXP x = CAR(args);
+
+    /**** having to use R_SEXP here is awkward */
+    if (! ALTREP(x) ||
+	(R_SEXP(R_altrep_class(x)) != R_SEXP(R_mmap_integer_class) &&
+	 R_SEXP(R_altrep_class(x)) != R_SEXP(R_mmap_real_class)))
+	error("not a memory-mapped object");
+
+    /* using the finalizer is a cheat to avoid yet another #ifdef Windows */
+    SEXP eptr = MMAP_EPTR(x);
+    errno = 0;
+    R_RunWeakRefFinalizer(R_ExternalPtrTag(eptr));
+    if (errno)
+	error("munmap: %s", strerror(errno));
+    return R_NilValue;
+}    
+	
 static const R_ExternalMethodDef ExtEntries[] = {
     {"mmap_file", (DL_FUNC) &do_mmap_file, -1},
+    {"munmap_file", (DL_FUNC) &do_munmap_file, -1},
     {NULL, NULL, 0}
 };
 

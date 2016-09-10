@@ -1,12 +1,13 @@
 \name{mmap}
 \alias{mmap}
-%- Also NEED an '\alias' for EACH other topic documented here.
+\alias{munmap}
 \title{Simple Memory-Mapped Vectors}
 \description{
-  Create R vectors with data in a memory-mapped file.
+  Create vectors with data in a memory-mapped file.
 }
 \usage{
 mmap(filename, type = c("double", "integer", "int"), ptrOK = FALSE, wrtOK = FALSE)
+munmap(x)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
@@ -14,12 +15,35 @@ mmap(filename, type = c("double", "integer", "int"), ptrOK = FALSE, wrtOK = FALS
   \item{type}{character; the binary data type of the elements in the file.}
   \item{ptrOK}{logical; whether the data pointer should be accessible.}
   \item{wrtOK}{logical; whether modifying the file is allowed.}
+  \item{x}{a memory-mapped object}
 }
-%%\details{
-%%  ~~ If necessary, more details than the description above ~~
-%%}
+\details{
+
+  \code{mmap} creates vector with data in a specified memory-mapped
+  file. The \code{type} argument specifies the binary element type in
+  the file; for now only \code{C} \code{double} and \code{int} are
+  supported.
+
+  If \code{ptrOK} is true, then \code{C} code requestion the data
+  pointer will succeed. A vector created with \code{ptrOK} true is
+  serialized as an ordinary vector, which will create a very large
+  serialization if the mapped file is large. If \code{ptrOK} is false,
+  then \code{C} code written to use the data pointer will fail; only
+  \code{C} code written to access individual elements or blocks will
+  succeed. A A vector created with \code{ptrOK} false is serialized by
+  recording the file name and data type as specified to \code{mmap} in
+  the serialization, and unserializing will attempt to recreate the
+  memory mapping.
+
+  The file is opened read-only if \code{wrtOK} is false. In this
+  case the vector is marked as not mutable and will be duplicated before
+  assignments are committed. Attempts by \code{C} code to write to the data
+  will produce a segment violation. If \code{wrtOK} is true, then the
+  file is opened for reading and writing, and an assighment that would
+  modify a stanard vector in place will modify the file.
+}
 \value{
-  An R vector of the specified type with data in a memory-mapped file.
+  A vector of the specified type with data in a memory-mapped file.
 }
 %%\references{
 %% ~put references to the literature/web site here ~
@@ -35,6 +59,7 @@ writeBin(x, tmp)
 y <- mmap(tmp)
 head(x)
 head(y)
+munmap(y)
 unlink(tmp)
 }
 \keyword{file}
