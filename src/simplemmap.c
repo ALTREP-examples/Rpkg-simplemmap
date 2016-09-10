@@ -3,10 +3,6 @@
 #include <R_ext/Rdynload.h>
 #include <R_ext/Altrep.h>
 
-#define MMAP_PKG simplemmap
-#define PKG_STR(NAME) (#NAME)
-#define PKG_INIT(NAME) R_init_##NAME
-#define PKG_UNLOAD(NAME) R_unload_##NAME
 
 /**
  ** Memory Mapped Vectors
@@ -40,7 +36,7 @@ static SEXP mmap_serialized_state(SEXP x)
     SEXP info = MMAP_INFO(x);
     mmap_info_t *pi = DATAPTR(info);
 
-    /**** For now, if ptrOK is true then serializa as a regular typed
+    /**** For now, if ptrOK is true then serialize as a regular typed
 	  vector. I ptrOK is false, then serialize information to
 	  allow the mmap to be reconstructed. The original file name
 	  is serialized; it will be expanded again when unserializing,
@@ -61,7 +57,7 @@ static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
     Rboolean ptrOK = INTEGER(dinfo)[1];
     Rboolean wrtOK = INTEGER(dinfo)[2];
 
-    /**** For now, this will throuw an error on failure. Eventualy
+    /**** For now, this will throw an error on failure. Eventualy
 	  this needs to have a mechanism to locate a file that isn't
 	  found or to return something reasonable, e.g. numeric(0), on
 	  failure. A faulure result should probably ignore the
@@ -196,40 +192,16 @@ static void InitMmapRealClass(DllInfo *info)
  * Constructor
  */
 
-#ifdef Win32
-static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
-{
-    /* I'm sure tis needs adjusting for Windows, so punt for now. */
-    error("not supported on Windows yet");
-}
-#else
-/* derived from the example in
-  https://www.safaribooksonline.com/library/view/linux-system-programming/0596009585/ch04s03.html */
-
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <unistd.h>
-#include <sys/mman.h>
-
-static void mmap_finalize(SEXP eptr)
-{
-    REprintf("finalizing ... ");
-    void *p = R_ExternalPtrAddr(eptr);
-    size_t len = REAL_ELT(CADR(R_ExternalPtrProtected(eptr)), 0);
-    R_SetExternalPtrAddr(eptr, NULL);
-
-    if (p != NULL) {
-	munmap(p, len); /* don't check for errors */
-	R_SetExternalPtrAddr(eptr, NULL);
-    }
-    REprintf("done\n");
-}
+/* Maintain a list of weak references to memory-mapped objects so a
+   request to unload the shared library can finalize them before
+   unloading; othersiwe, attempting to run a finalizer after unloading
+   would result in an illegal operation. */
 
 static SEXP mmap_list = NULL;
 
 #define MAXCOUNT 10
 
+static void mmap_finalize(SEXP eptr);
 static void register_mmap_eptr(SEXP eptr)
 {
     /* clean out the weak list every MAXCOUNT calls*/
@@ -249,7 +221,8 @@ static void register_mmap_eptr(SEXP eptr)
     SETCDR(mmap_list, 
 	   CONS(R_MakeWeakRefC(eptr, R_NilValue, mmap_finalize, TRUE),
 		CDR(mmap_list)));
-    /* store the weak reference for unmapping */
+
+    /* store the weak reference in the external pointer for do_munmap_file */
     R_SetExternalPtrTag(eptr, CAR(CDR(mmap_list)));
 }
 
@@ -259,6 +232,41 @@ static void finalize_mmap_objects()
     for (SEXP next = CDR(mmap_list); next != R_NilValue; next = CDR(next))
 	R_RunWeakRefFinalizer(CAR(next));
     R_ReleaseObject(mmap_list);
+}
+
+static Rboolean asLogicalNA(SEXP x, Rboolean dflt)
+{
+    Rboolean val = asLogical(x);
+    return val == NA_LOGICAL ? dflt : val;
+}
+
+#ifdef Win32
+# error "I'm sure this needs adjusting for Windows, so punt for now."
+#else
+/* derived from the example in
+  https://www.safaribooksonline.com/library/view/linux-system-programming/0596009585/ch04s03.html */
+
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <unistd.h>
+#include <sys/mman.h>
+
+//#define DEBUG_PRINT(x) REprintf(x);
+#define DEBUG_PRINT(x) do { } while (0)
+
+static void mmap_finalize(SEXP eptr)
+{
+    DEBUG_PRINT("finalizing ... ");
+    void *p = R_ExternalPtrAddr(eptr);
+    size_t len = REAL_ELT(CADR(R_ExternalPtrProtected(eptr)), 0);
+    R_SetExternalPtrAddr(eptr, NULL);
+
+    if (p != NULL) {
+	munmap(p, len); /* don't check for errors */
+	R_SetExternalPtrAddr(eptr, NULL);
+    }
+    DEBUG_PRINT("done\n");
 }
 
 static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
@@ -320,12 +328,6 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
     return ans;
 }
 #endif
-
-static Rboolean asLogicalNA(SEXP x, Rboolean dflt)
-{
-    Rboolean val = asLogical(x);
-    return val == NA_LOGICAL ? dflt : val;
-}
 
 SEXP do_mmap_file(SEXP args)
 {
