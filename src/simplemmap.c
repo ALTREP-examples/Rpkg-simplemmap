@@ -363,10 +363,9 @@ SEXP do_munmap_file(SEXP args)
     args = CDR(args);
     SEXP x = CAR(args);
 
-    /**** having to use R_SEXP here is awkward */
-    if (! ALTREP(x) ||
-	(R_SEXP(R_altrep_class(x)) != R_SEXP(R_mmap_integer_class) &&
-	 R_SEXP(R_altrep_class(x)) != R_SEXP(R_mmap_real_class)))
+    /**** would be useful to have R_mmap_class virtual class as parent here */
+    if (! (R_altrep_inherits(x, R_mmap_integer_class) ||
+	   R_altrep_inherits(x, R_mmap_real_class)))
 	error("not a memory-mapped object");
 
     /* using the finalizer is a cheat to avoid yet another #ifdef Windows */
