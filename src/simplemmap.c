@@ -286,13 +286,14 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
     if (p == MAP_FAILED)
 	error("mmap: %s", strerror(errno));
 
-    SEXP data = PROTECT(CONS(file, R_NilValue));
-    SETCDR(data, CONS(ScalarReal(sb.st_size), R_NilValue));
-    SEXP dinfo = allocVector(INTSXP, 3);
+    SEXP size = PROTECT(ScalarReal(sb.st_size));
+
+    SEXP dinfo = PROTECT(allocVector(INTSXP, 3));
     INTEGER(dinfo)[0] = type;
     INTEGER(dinfo)[1] = ptrOK;
     INTEGER(dinfo)[2] = wrtOK;
-    SETCDR(CDR(data), CONS(dinfo, R_NilValue));
+
+    SEXP data = PROTECT(list3(file, size, dinfo));
     SEXP eptr = PROTECT(R_MakeExternalPtr(p, R_NilValue, data));
     SEXP info = PROTECT(allocVector(RAWSXP, sizeof(mmap_info_t)));
     mmap_info_t *pi = DATAPTR(info);
@@ -318,7 +319,7 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
     if (ptrOK && ! wrtOK)
 	MARK_NOT_MUTABLE(ans);
 
-    UNPROTECT(3); /* data, eptr, info */
+    UNPROTECT(5); /* size, dinfo, data, eptr, info */
     return ans;
 }
 #endif
