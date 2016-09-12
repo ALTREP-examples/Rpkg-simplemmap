@@ -175,7 +175,7 @@ static SEXP mmap_serialized_state(SEXP x)
 	return MMAP_STATE(x);
 }
 
-static SEXP mmap_file(SEXP, int, Rboolean, Rboolean);
+static SEXP mmap_file(SEXP, int, Rboolean, Rboolean, Rboolean);
 
 static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
 {
@@ -184,12 +184,15 @@ static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
     Rboolean ptrOK = MMAP_STATE_PTROK(state);
     Rboolean wrtOK = MMAP_STATE_WRTOK(state);
 
-    /**** For now, this will throw an error on failure. Eventualy
-	  this needs to have a mechanism to locate a file that isn't
-	  found or to return something reasonable, e.g. numeric(0), on
-	  failure. A failure result should probably ignore the
-	  attributes. */
-    SEXP val = mmap_file(file, type, ptrOK, wrtOK);
+    SEXP val = mmap_file(file, type, ptrOK, wrtOK, TRUE);
+    if (val == NULL) {
+	/**** The attempt to memory map failed. Eventualy it would be
+	      good to have a mechanism to allow the user to try to
+	      resolve this.  For now, return a length zero vector with
+	      another warning. */
+	warning("memory mapping failed; returning vector of length zero");
+	return allocVector(type, 0);
+    }
     SET_ATTRIB(val, attr);
     return val;
 }
@@ -216,9 +219,11 @@ static R_xlen_t mmap_xlength(SEXP x)
 
 static void *mmap_dataptr(SEXP x)
 {
-    /**** get addr first to get error for unmapped? */
+    /* get addr first to get error if the object has been unmapped */
+    void *addr = MMAP_ADDR(x);
+
     if (MMAP_PTROK(x))
-	return MMAP_ADDR(x);
+	return addr;
     else
 	error("cannot access data pointer for this mmaped vector");
 }
@@ -355,28 +360,37 @@ static void mmap_finalize(SEXP eptr)
     DEBUG_PRINT("done\n");
 }
 
-static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
+#define MMAP_FILE_WARNING_OR_ERROR(str, ...) do {	\
+	if (warn) {					\
+	    warning(str, __VA_ARGS__);			\
+	    return NULL;				\
+	}						\
+	else error(str, __VA_ARGS__);			\
+    } while (0)
+	    
+static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
+		      Rboolean warn)
 {
     const char *efn = R_ExpandFileName(translateChar(STRING_ELT(file, 0)));
     struct stat sb;
 
     /* Target not link */
     if (stat(efn, &sb) != 0)
-	error("stat: %s", strerror(errno));
+	MMAP_FILE_WARNING_OR_ERROR("stat: %s", strerror(errno));
 
     if (! S_ISREG(sb.st_mode))
-	error("%s is not a regular file", efn);
+	MMAP_FILE_WARNING_OR_ERROR("%s is not a regular file", efn);
 
     int oflags = wrtOK ? O_RDWR : O_RDONLY;
     int fd = open(efn, oflags);
     if (fd == -1)
-	error("open: %s", strerror(errno));
+	MMAP_FILE_WARNING_OR_ERROR("open: %s", strerror(errno));
 
     int pflags = wrtOK ? PROT_READ | PROT_WRITE : PROT_READ;
     void *p = mmap(0, sb.st_size, pflags, MAP_SHARED, fd, 0);
     close(fd); /* don't care if this fails */
     if (p == MAP_FAILED)
-	error("mmap: %s", strerror(errno));
+	MMAP_FILE_WARNING_OR_ERROR("mmap: %s", strerror(errno));
 
     return make_mmap(p, file, sb.st_size, type, ptrOK, wrtOK);
 }
@@ -414,7 +428,7 @@ SEXP do_mmap_file(SEXP args)
     if (TYPEOF(file) != STRSXP || LENGTH(file) != 1 || file == NA_STRING)
 	error("invalud 'file' argument");
 
-    return mmap_file(file, type, ptrOK, wrtOK);
+    return mmap_file(file, type, ptrOK, wrtOK, FALSE);
 }
 
 SEXP do_munmap_file(SEXP args)
