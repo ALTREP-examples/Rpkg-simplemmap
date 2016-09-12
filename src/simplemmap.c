@@ -9,17 +9,100 @@
  **/
 
 /*
- * Methods
+ * MMAP Object State
  */
 
-typedef struct {
-    R_xlen_t len;
-    Rboolean ptrOK;
-    Rboolean wrtOK;
-} mmap_info_t;
+/* State is hald in a LISTSXP of length 3, and includes
+   
+       file
+       size and length in a REALSXP
+       type, ptrOK, wrtOK in an INTSXP
+
+   These are used by the methods, and also represent the serialized
+   state object.
+ */
+
+static SEXP make_mmap_state(SEXP file, size_t size, int type,
+			    Rboolean ptrOK, Rboolean wrtOK)
+{
+    SEXP sizes = PROTECT(allocVector(REALSXP, 2));
+    double *dsizes = REAL(sizes);
+    dsizes[0] = size;
+    switch(type) {
+    case INTSXP: dsizes[1] = size / sizeof(int); break;
+    case REALSXP: dsizes[1] = size / sizeof(double); break;
+    default: error("mmap for %s not supported yet", type2char(type));
+    }
+
+    SEXP info = PROTECT(allocVector(INTSXP, 3));
+    INTEGER(info)[0] = type;
+    INTEGER(info)[1] = ptrOK;
+    INTEGER(info)[2] = wrtOK;
+
+    SEXP state = list3(file, sizes, info);
+
+    UNPROTECT(2);
+    return state;
+}
+			    
+#define MMAP_STATE_FILE(x) CAR(x)
+#define MMAP_STATE_SIZE(x) ((size_t) REAL_ELT(CADR(x), 0))
+#define MMAP_STATE_LENGTH(x) ((size_t) REAL_ELT(CADR(x), 1))
+#define MMAP_STATE_TYPE(x) INTEGER(CADDR(x))[0]
+#define MMAP_STATE_PTROK(x) INTEGER(CADDR(x))[1]
+#define MMAP_STATE_WRTOK(x) INTEGER(CADDR(x))[2]
+
+
+/*
+ * MMAP Classes and Objects
+ */
+
+static R_altrep_class_t mmap_integer_class;
+static R_altrep_class_t mmap_real_class;
+
+/* MMAP objects are ALTREP objects with data fields
+
+       data1: an external pointer to the mmaped address
+       data2: the MMAP object's state
+
+   The state is also stored in the Protected field of the external
+   pointer for use by the finalizer.
+*/
+
+static void register_mmap_eptr(SEXP eptr);
+static SEXP make_mmap(void *p, SEXP file, size_t size, int type,
+		      Rboolean ptrOK, Rboolean wrtOK)
+{
+    SEXP state = PROTECT(make_mmap_state(file, size, type, ptrOK, wrtOK));
+    SEXP eptr = PROTECT(R_MakeExternalPtr(p, R_NilValue, state));
+    register_mmap_eptr(eptr);
+
+    R_altrep_class_t class;
+    switch(type) {
+    case INTSXP:
+	class = mmap_integer_class;
+	break;
+    case REALSXP:
+	class = mmap_real_class;
+	break;
+    default: error("mmap for %s not supported yet", type2char(type));
+    }
+
+    SEXP ans = R_new_altrep(class, eptr, state);
+    if (ptrOK && ! wrtOK)
+	MARK_NOT_MUTABLE(ans);
+
+    UNPROTECT(2); /* state, eptr */
+    return ans;
+}
 
 #define MMAP_EPTR(x) R_altrep_data1(x)
-#define MMAP_INFO(x) R_altrep_data2(x)
+#define MMAP_STATE(x) R_altrep_data2(x)
+#define MMAP_LENGTH(x) MMAP_STATE_LENGTH(MMAP_STATE(x))
+#define MMAP_PTROK(x) MMAP_STATE_PTROK(MMAP_STATE(x))
+#define MMAP_WRTOK(x) MMAP_STATE_WRTOK(MMAP_STATE(x))
+
+#define MMAP_EPTR_STATE(x) R_ExternalPtrProtected(x)
 
 static R_INLINE void *MMAP_ADDR(SEXP x)
 {
@@ -31,171 +114,11 @@ static R_INLINE void *MMAP_ADDR(SEXP x)
     return addr;
 }
 
-static SEXP mmap_serialized_state(SEXP x)
-{
-    SEXP info = MMAP_INFO(x);
-    mmap_info_t *pi = DATAPTR(info);
-
-    /**** For now, if ptrOK is true then serialize as a regular typed
-	  vector. I ptrOK is false, then serialize information to
-	  allow the mmap to be reconstructed. The original file name
-	  is serialized; it will be expanded again when unserializing,
-	  in a context where the result may be different. */
-    if (pi->ptrOK)
-	return NULL;
-    else
-	return R_ExternalPtrProtected(MMAP_EPTR(x));
-}
-
-static SEXP mmap_file(SEXP, int, Rboolean, Rboolean);
-
-static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
-{
-    SEXP file = CAR(state);
-    SEXP dinfo = CADDR(state);
-    int type = INTEGER(dinfo)[0];
-    Rboolean ptrOK = INTEGER(dinfo)[1];
-    Rboolean wrtOK = INTEGER(dinfo)[2];
-
-    /**** For now, this will throw an error on failure. Eventualy
-	  this needs to have a mechanism to locate a file that isn't
-	  found or to return something reasonable, e.g. numeric(0), on
-	  failure. A faulure result should probably ignore the
-	  attributes. */
-    SEXP val = mmap_file(file, type, ptrOK, wrtOK);
-    SET_ATTRIB(val, attr);
-    return val;
-}
-
-Rboolean mmap_inspect(SEXP x, int pre, int deep, int pvec,
-		      void (*inspect_subtree)(SEXP, int, int, int))
-{
-    SEXP info = MMAP_INFO(x);
-    mmap_info_t *pi = DATAPTR(info);
-    Rprintf(" mmaped %s", type2char(TYPEOF(x)));
-    Rprintf(" [ptr=%d,wrt=%d]\n", pi->ptrOK, pi->wrtOK);
-    return TRUE;
-}
-
-static R_xlen_t mmap_xlength(SEXP x)
-{
-    SEXP info = MMAP_INFO(x);
-    mmap_info_t *pi = DATAPTR(info);
-    return pi->len;
-}
-
-static void *mmap_dataptr(SEXP x)
-{
-    SEXP info = MMAP_INFO(x);
-    mmap_info_t *pi = DATAPTR(info);
-    if (pi->ptrOK)
-	return MMAP_ADDR(x);
-    else
-	error("cannot access data pointer for this mmaped vector");
-}
-
-static void *mmap_dataptr_or_null(SEXP x)
-{
-    SEXP info = MMAP_INFO(x);
-    mmap_info_t *pi = DATAPTR(info);
-    return pi->ptrOK ? MMAP_ADDR(x) : NULL;
-}
-
-static int mmap_integer_elt(SEXP x, R_xlen_t i)
-{
-    int *p = MMAP_ADDR(x);
-    return p[i];
-}
-
-static
-R_xlen_t mmap_integer_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, int *buf)
-{
-    int *x = MMAP_ADDR(sx);
-    R_xlen_t size = XLENGTH(sx);
-    R_xlen_t ncopy = size - i > n ? n : size - i;
-    for (R_xlen_t k = 0; k < ncopy; k++)
-	buf[k] = x[k + i];
-    //memcpy(buf, x + i, ncopy * sizeof(int));
-    return ncopy;
-}
-
-static double mmap_real_elt(SEXP x, R_xlen_t i)
-{
-    double *p = MMAP_ADDR(x);
-    return p[i];
-}
-
-static
-R_xlen_t mmap_real_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, double *buf)
-{
-    double *x = MMAP_ADDR(sx);
-    R_xlen_t size = XLENGTH(sx);
-    R_xlen_t ncopy = size - i > n ? n : size - i;
-    for (R_xlen_t k = 0; k < ncopy; k++)
-	buf[k] = x[k + i];
-    //memcpy(buf, x + i, ncopy * sizeof(double));
-    return ncopy;
-}
-
-
-/*
- * Class Objects and Method Tables
- */
-
-static R_altrep_class_t R_mmap_integer_class;
-static R_altrep_class_t R_mmap_real_class;
-
-static void InitMmapIntegerClass(DllInfo *info)
-{
-    R_altrep_class_t cls =
-	R_make_altinteger_class("mmap_integer", "simplemmap", info);
-    R_mmap_integer_class = cls;
- 
-    /* override ALTREP methods */
-    R_set_altrep_unserialize_method(cls, mmap_unserialize);
-    R_set_altrep_serialized_state_method(cls, mmap_serialized_state);
-    R_set_altrep_inspect_method(cls, mmap_inspect);
-
-    /* override ALTVEC methods */
-    R_set_altvec_length_method(cls, mmap_xlength);
-    R_set_altvec_dataptr_method(cls, mmap_dataptr);
-    R_set_altvec_dataptr_or_null_method(cls, mmap_dataptr_or_null);
-
-    /* override ALTINTEGER methods */
-    R_set_altinteger_elt_method(cls, mmap_integer_elt);
-    R_set_altinteger_get_region_method(cls, mmap_integer_get_region);
-}
-
-static void InitMmapRealClass(DllInfo *info)
-{
-    R_altrep_class_t cls =
-	R_make_altreal_class("mmap_real", "simplemmap", info);
-    R_mmap_real_class = cls;
-
-    /* override ALTREP methods */
-    R_set_altrep_unserialize_method(cls, mmap_unserialize);
-    R_set_altrep_serialized_state_method(cls, mmap_serialized_state);
-    R_set_altrep_inspect_method(cls, mmap_inspect);
-
-    /* override ALTVEC methods */
-    R_set_altvec_length_method(cls, mmap_xlength);
-    R_set_altvec_dataptr_method(cls, mmap_dataptr);
-    R_set_altvec_dataptr_or_null_method(cls, mmap_dataptr_or_null);
-
-    /* override ALTREAL methods */
-    R_set_altreal_elt_method(cls, mmap_real_elt);
-    R_set_altreal_get_region_method(cls, mmap_real_get_region);
-}
-
-
-/*
- * Constructor
- */
-
-/* Maintain a list of weak references to memory-mapped objects so a
-   request to unload the shared library can finalize them before
-   unloading; othersiwe, attempting to run a finalizer after unloading
-   would result in an illegal operation. */
+/* We need to maintain a list of weak references to the external
+   pointers of memory-mapped objects so a request to unload the shared
+   library can finalize them before unloading; otherwise, attempting
+   to run a finalizer after unloading would result in an illegal
+   instruction. */
 
 static SEXP mmap_list = NULL;
 
@@ -234,6 +157,175 @@ static void finalize_mmap_objects()
     R_ReleaseObject(mmap_list);
 }
 
+
+/*
+ * ALTREP Methods
+ */
+
+static SEXP mmap_serialized_state(SEXP x)
+{
+    /**** For now, if ptrOK is true then serialize as a regular typed
+	  vector. If ptrOK is false, then serialize information to
+	  allow the mmap to be reconstructed. The original file name
+	  is serialized; it will be expanded again when unserializing,
+	  in a context where the result may be different. */
+    if (MMAP_PTROK(x))
+	return NULL;
+    else
+	return MMAP_STATE(x);
+}
+
+static SEXP mmap_file(SEXP, int, Rboolean, Rboolean);
+
+static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
+{
+    SEXP file = MMAP_STATE_FILE(state);
+    int type = MMAP_STATE_TYPE(state);
+    Rboolean ptrOK = MMAP_STATE_PTROK(state);
+    Rboolean wrtOK = MMAP_STATE_WRTOK(state);
+
+    /**** For now, this will throw an error on failure. Eventualy
+	  this needs to have a mechanism to locate a file that isn't
+	  found or to return something reasonable, e.g. numeric(0), on
+	  failure. A failure result should probably ignore the
+	  attributes. */
+    SEXP val = mmap_file(file, type, ptrOK, wrtOK);
+    SET_ATTRIB(val, attr);
+    return val;
+}
+
+Rboolean mmap_inspect(SEXP x, int pre, int deep, int pvec,
+		      void (*inspect_subtree)(SEXP, int, int, int))
+{
+    Rboolean ptrOK = MMAP_PTROK(x);
+    Rboolean wrtOK = MMAP_WRTOK(x);
+    Rprintf(" mmaped %s", type2char(TYPEOF(x)));
+    Rprintf(" [ptr=%d,wrt=%d]\n", ptrOK, wrtOK);
+    return TRUE;
+}
+
+
+/*
+ * ALTVEC Methods
+ */
+
+static R_xlen_t mmap_xlength(SEXP x)
+{
+    return MMAP_LENGTH(x);
+}
+
+static void *mmap_dataptr(SEXP x)
+{
+    /**** get addr first to get error for unmapped? */
+    if (MMAP_PTROK(x))
+	return MMAP_ADDR(x);
+    else
+	error("cannot access data pointer for this mmaped vector");
+}
+
+static void *mmap_dataptr_or_null(SEXP x)
+{
+    return MMAP_PTROK(x) ? MMAP_ADDR(x) : NULL;
+}
+
+
+/*
+ * ALTINTEGER Methods
+ */
+
+static int mmap_integer_elt(SEXP x, R_xlen_t i)
+{
+    int *p = MMAP_ADDR(x);
+    return p[i];
+}
+
+static
+R_xlen_t mmap_integer_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, int *buf)
+{
+    int *x = MMAP_ADDR(sx);
+    R_xlen_t size = XLENGTH(sx);
+    R_xlen_t ncopy = size - i > n ? n : size - i;
+    for (R_xlen_t k = 0; k < ncopy; k++)
+	buf[k] = x[k + i];
+    //memcpy(buf, x + i, ncopy * sizeof(int));
+    return ncopy;
+}
+
+
+/*
+ * ALTREAL Methods
+ */
+
+static double mmap_real_elt(SEXP x, R_xlen_t i)
+{
+    double *p = MMAP_ADDR(x);
+    return p[i];
+}
+
+static
+R_xlen_t mmap_real_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, double *buf)
+{
+    double *x = MMAP_ADDR(sx);
+    R_xlen_t size = XLENGTH(sx);
+    R_xlen_t ncopy = size - i > n ? n : size - i;
+    for (R_xlen_t k = 0; k < ncopy; k++)
+	buf[k] = x[k + i];
+    //memcpy(buf, x + i, ncopy * sizeof(double));
+    return ncopy;
+}
+
+
+/*
+ * Class Objects and Method Tables
+ */
+
+static void InitMmapIntegerClass(DllInfo *info)
+{
+    R_altrep_class_t cls =
+	R_make_altinteger_class("mmap_integer", "simplemmap", info);
+    mmap_integer_class = cls;
+ 
+    /* override ALTREP methods */
+    R_set_altrep_unserialize_method(cls, mmap_unserialize);
+    R_set_altrep_serialized_state_method(cls, mmap_serialized_state);
+    R_set_altrep_inspect_method(cls, mmap_inspect);
+
+    /* override ALTVEC methods */
+    R_set_altvec_length_method(cls, mmap_xlength);
+    R_set_altvec_dataptr_method(cls, mmap_dataptr);
+    R_set_altvec_dataptr_or_null_method(cls, mmap_dataptr_or_null);
+
+    /* override ALTINTEGER methods */
+    R_set_altinteger_elt_method(cls, mmap_integer_elt);
+    R_set_altinteger_get_region_method(cls, mmap_integer_get_region);
+}
+
+static void InitMmapRealClass(DllInfo *info)
+{
+    R_altrep_class_t cls =
+	R_make_altreal_class("mmap_real", "simplemmap", info);
+    mmap_real_class = cls;
+
+    /* override ALTREP methods */
+    R_set_altrep_unserialize_method(cls, mmap_unserialize);
+    R_set_altrep_serialized_state_method(cls, mmap_serialized_state);
+    R_set_altrep_inspect_method(cls, mmap_inspect);
+
+    /* override ALTVEC methods */
+    R_set_altvec_length_method(cls, mmap_xlength);
+    R_set_altvec_dataptr_method(cls, mmap_dataptr);
+    R_set_altvec_dataptr_or_null_method(cls, mmap_dataptr_or_null);
+
+    /* override ALTREAL methods */
+    R_set_altreal_elt_method(cls, mmap_real_elt);
+    R_set_altreal_get_region_method(cls, mmap_real_get_region);
+}
+
+
+/*
+ * Constructor
+ */
+
 #ifdef Win32
 # error "I'm sure this needs adjusting for Windows, so punt for now."
 #else
@@ -246,18 +338,18 @@ static void finalize_mmap_objects()
 #include <unistd.h>
 #include <sys/mman.h>
 
-//#define DEBUG_PRINT(x) REprintf(x);
-#define DEBUG_PRINT(x) do { } while (0)
+#define DEBUG_PRINT(x) REprintf(x);
+//#define DEBUG_PRINT(x) do { } while (0)
 
 static void mmap_finalize(SEXP eptr)
 {
     DEBUG_PRINT("finalizing ... ");
     void *p = R_ExternalPtrAddr(eptr);
-    size_t len = REAL_ELT(CADR(R_ExternalPtrProtected(eptr)), 0);
+    size_t size = MMAP_STATE_SIZE(MMAP_EPTR_STATE(eptr));
     R_SetExternalPtrAddr(eptr, NULL);
 
     if (p != NULL) {
-	munmap(p, len); /* don't check for errors */
+	munmap(p, size); /* don't check for errors */
 	R_SetExternalPtrAddr(eptr, NULL);
     }
     DEBUG_PRINT("done\n");
@@ -286,41 +378,7 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK)
     if (p == MAP_FAILED)
 	error("mmap: %s", strerror(errno));
 
-    SEXP size = PROTECT(ScalarReal(sb.st_size));
-
-    SEXP dinfo = PROTECT(allocVector(INTSXP, 3));
-    INTEGER(dinfo)[0] = type;
-    INTEGER(dinfo)[1] = ptrOK;
-    INTEGER(dinfo)[2] = wrtOK;
-
-    SEXP data = PROTECT(list3(file, size, dinfo));
-    SEXP eptr = PROTECT(R_MakeExternalPtr(p, R_NilValue, data));
-    SEXP info = PROTECT(allocVector(RAWSXP, sizeof(mmap_info_t)));
-    mmap_info_t *pi = DATAPTR(info);
-    pi->ptrOK = ptrOK;
-    pi->wrtOK = wrtOK;
-
-    register_mmap_eptr(eptr);
-
-    R_altrep_class_t class;
-    switch(type) {
-    case INTSXP:
-	pi->len = sb.st_size / sizeof(int);
-	class = R_mmap_integer_class;
-	break;
-    case REALSXP:
-	pi->len = sb.st_size / sizeof(double);
-	class = R_mmap_real_class;
-	break;
-    default: error("mmap for %s not supported yet", type2char(type));
-    }
-
-    SEXP ans = R_new_altrep(class, eptr, info);
-    if (ptrOK && ! wrtOK)
-	MARK_NOT_MUTABLE(ans);
-
-    UNPROTECT(5); /* size, dinfo, data, eptr, info */
-    return ans;
+    return make_mmap(p, file, sb.st_size, type, ptrOK, wrtOK);
 }
 #endif
 
@@ -365,8 +423,8 @@ SEXP do_munmap_file(SEXP args)
     SEXP x = CAR(args);
 
     /**** would be useful to have R_mmap_class virtual class as parent here */
-    if (! (R_altrep_inherits(x, R_mmap_integer_class) ||
-	   R_altrep_inherits(x, R_mmap_real_class)))
+    if (! (R_altrep_inherits(x, mmap_integer_class) ||
+	   R_altrep_inherits(x, mmap_real_class)))
 	error("not a memory-mapped object");
 
     /* using the finalizer is a cheat to avoid yet another #ifdef Windows */
@@ -383,6 +441,11 @@ static const R_ExternalMethodDef ExtEntries[] = {
     {"munmap_file", (DL_FUNC) &do_munmap_file, -1},
     {NULL, NULL, 0}
 };
+
+
+/*
+ * Shared Library Initialization and Finalization
+ */
 
 void R_init_simplemmap(DllInfo *info)
 {
