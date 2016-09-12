@@ -6,7 +6,7 @@
   Create vectors with data in a memory-mapped file.
 }
 \usage{
-mmap(filename, type = c("double", "integer", "int"), ptrOK = FALSE, wrtOK = FALSE)
+mmap(filename, type = c("double", "integer", "int"), ptrOK = TRUE, wrtOK = FALSE)
 munmap(x)
 }
 %- maybe also 'usage' for other objects documented here.
@@ -24,23 +24,28 @@ munmap(x)
   the file; for now only \code{C} \code{double} and \code{int} are
   supported.
 
-  If \code{ptrOK} is true, then \code{C} code requestion the data
-  pointer will succeed. A vector created with \code{ptrOK} true is
-  serialized as an ordinary vector, which will create a very large
-  serialization if the mapped file is large. If \code{ptrOK} is false,
-  then \code{C} code written to use the data pointer will fail; only
-  \code{C} code written to access individual elements or blocks will
-  succeed. A A vector created with \code{ptrOK} false is serialized by
+  If \code{ptrOK} is true, then \code{C} code requesting the data
+  pointer will succeed, which means all C code written to work with R
+  vectors should work, but may cause large allocations for result
+  objects if the file mapped file is large.  For now, A vector created
+  with \code{ptrOK} true is serialized as an ordinary vector, which will
+  create a very large serialization if the mapped file is large. If
+  \code{ptrOK} is false, then \code{C} code written to use the data
+  pointer will fail; only \code{C} code written to access individual
+  elements or blocks will succeed. Code for basic summary methods and
+  subsettin has been rewritten to access data only by elements or
+  blocks.  A vector created with \code{ptrOK} false is serialized by
   recording the file name and data type as specified to \code{mmap} in
   the serialization, and unserializing will attempt to recreate the
-  memory mapping.
+  memory mapping. If this fails, \code{unserialize} will issue a warning
+  and return a zero-length vector.
 
   The file is opened read-only if \code{wrtOK} is false. In this
   case the vector is marked as not mutable and will be duplicated before
   assignments are committed. Attempts by \code{C} code to write to the data
-  will produce a segment violation. If \code{wrtOK} is true, then the
-  file is opened for reading and writing, and an assighment that would
-  modify a stanard vector in place will modify the file.
+  will produce a segmentation fault. If \code{wrtOK} is true, then the
+  file is opened for reading and writing, and an assignment that would
+  modify a standard vector in place will modify the file.
 }
 \value{
   A vector of the specified type with data in a memory-mapped file.
