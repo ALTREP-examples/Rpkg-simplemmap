@@ -185,7 +185,7 @@ static void finalize_mmap_objects()
  * ALTREP Methods
  */
 
-static SEXP mmap_serialized_state(SEXP x)
+static SEXP mmap_Serialized_state(SEXP x)
 {
     /**** For now, if ptrOK is true then serialize as a regular typed
 	  vector. If ptrOK is false, then serialize information to
@@ -200,7 +200,7 @@ static SEXP mmap_serialized_state(SEXP x)
 
 static SEXP mmap_file(SEXP, int, Rboolean, Rboolean, Rboolean);
 
-static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
+static SEXP mmap_Unserialize(SEXP class, SEXP state, SEXP attr)
 {
     SEXP file = MMAP_STATE_FILE(state);
     int type = MMAP_STATE_TYPE(state);
@@ -220,7 +220,7 @@ static SEXP mmap_unserialize(SEXP class, SEXP state, SEXP attr)
     return val;
 }
 
-Rboolean mmap_inspect(SEXP x, int pre, int deep, int pvec,
+Rboolean mmap_Inspect(SEXP x, int pre, int deep, int pvec,
 		      void (*inspect_subtree)(SEXP, int, int, int))
 {
     Rboolean ptrOK = MMAP_PTROK(x);
@@ -235,12 +235,12 @@ Rboolean mmap_inspect(SEXP x, int pre, int deep, int pvec,
  * ALTVEC Methods
  */
 
-static R_xlen_t mmap_xlength(SEXP x)
+static R_xlen_t mmap_Length(SEXP x)
 {
     return MMAP_LENGTH(x);
 }
 
-static void *mmap_dataptr(SEXP x)
+static void *mmap_Dataptr(SEXP x)
 {
     /* get addr first to get error if the object has been unmapped */
     void *addr = MMAP_ADDR(x);
@@ -251,7 +251,7 @@ static void *mmap_dataptr(SEXP x)
 	error("cannot access data pointer for this mmaped vector");
 }
 
-static void *mmap_dataptr_or_null(SEXP x)
+static void *mmap_Dataptr_or_null(SEXP x)
 {
     return MMAP_PTROK(x) ? MMAP_ADDR(x) : NULL;
 }
@@ -261,14 +261,14 @@ static void *mmap_dataptr_or_null(SEXP x)
  * ALTINTEGER Methods
  */
 
-static int mmap_integer_elt(SEXP x, R_xlen_t i)
+static int mmap_integer_Elt(SEXP x, R_xlen_t i)
 {
     int *p = MMAP_ADDR(x);
     return p[i];
 }
 
 static
-R_xlen_t mmap_integer_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, int *buf)
+R_xlen_t mmap_integer_Get_region(SEXP sx, R_xlen_t i, R_xlen_t n, int *buf)
 {
     int *x = MMAP_ADDR(sx);
     R_xlen_t size = XLENGTH(sx);
@@ -284,14 +284,14 @@ R_xlen_t mmap_integer_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, int *buf)
  * ALTREAL Methods
  */
 
-static double mmap_real_elt(SEXP x, R_xlen_t i)
+static double mmap_real_Elt(SEXP x, R_xlen_t i)
 {
     double *p = MMAP_ADDR(x);
     return p[i];
 }
 
 static
-R_xlen_t mmap_real_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, double *buf)
+R_xlen_t mmap_real_Get_region(SEXP sx, R_xlen_t i, R_xlen_t n, double *buf)
 {
     double *x = MMAP_ADDR(sx);
     R_xlen_t size = XLENGTH(sx);
@@ -320,18 +320,18 @@ static void InitMmapIntegerClass(DllInfo *dll)
     mmap_integer_class = cls;
  
     /* override ALTREP methods */
-    R_set_altrep_unserialize_method(cls, mmap_unserialize);
-    R_set_altrep_serialized_state_method(cls, mmap_serialized_state);
-    R_set_altrep_inspect_method(cls, mmap_inspect);
+    R_set_altrep_Unserialize_method(cls, mmap_Unserialize);
+    R_set_altrep_Serialized_state_method(cls, mmap_Serialized_state);
+    R_set_altrep_Inspect_method(cls, mmap_Inspect);
 
     /* override ALTVEC methods */
-    R_set_altvec_length_method(cls, mmap_xlength);
-    R_set_altvec_dataptr_method(cls, mmap_dataptr);
-    R_set_altvec_dataptr_or_null_method(cls, mmap_dataptr_or_null);
+    R_set_altvec_Length_method(cls, mmap_Length);
+    R_set_altvec_Dataptr_method(cls, mmap_Dataptr);
+    R_set_altvec_Dataptr_or_null_method(cls, mmap_Dataptr_or_null);
 
     /* override ALTINTEGER methods */
-    R_set_altinteger_elt_method(cls, mmap_integer_elt);
-    R_set_altinteger_get_region_method(cls, mmap_integer_get_region);
+    R_set_altinteger_Elt_method(cls, mmap_integer_Elt);
+    R_set_altinteger_Get_region_method(cls, mmap_integer_Get_region);
 }
 
 static void InitMmapRealClass(DllInfo *dll)
@@ -341,18 +341,18 @@ static void InitMmapRealClass(DllInfo *dll)
     mmap_real_class = cls;
 
     /* override ALTREP methods */
-    R_set_altrep_unserialize_method(cls, mmap_unserialize);
-    R_set_altrep_serialized_state_method(cls, mmap_serialized_state);
-    R_set_altrep_inspect_method(cls, mmap_inspect);
+    R_set_altrep_Unserialize_method(cls, mmap_Unserialize);
+    R_set_altrep_Serialized_state_method(cls, mmap_Serialized_state);
+    R_set_altrep_Inspect_method(cls, mmap_Inspect);
 
     /* override ALTVEC methods */
-    R_set_altvec_length_method(cls, mmap_xlength);
-    R_set_altvec_dataptr_method(cls, mmap_dataptr);
-    R_set_altvec_dataptr_or_null_method(cls, mmap_dataptr_or_null);
+    R_set_altvec_Length_method(cls, mmap_Length);
+    R_set_altvec_Dataptr_method(cls, mmap_Dataptr);
+    R_set_altvec_Dataptr_or_null_method(cls, mmap_Dataptr_or_null);
 
     /* override ALTREAL methods */
-    R_set_altreal_elt_method(cls, mmap_real_elt);
-    R_set_altreal_get_region_method(cls, mmap_real_get_region);
+    R_set_altreal_Elt_method(cls, mmap_real_Elt);
+    R_set_altreal_Get_region_method(cls, mmap_real_Get_region);
 }
 
 
