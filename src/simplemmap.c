@@ -1,3 +1,8 @@
+/*
+ *  Copyright (C) 2016   The R Core Team
+ *  Distributed under GPL 2 or 3
+ */
+
 #include <R.h>
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>

@@ -1,3 +1,6 @@
+% Copyright 2016 R Core Team
+% Distributed under GPL 2 or 3
+
 \name{mmap}
 \alias{mmap}
 \alias{munmap}
