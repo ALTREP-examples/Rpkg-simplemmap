@@ -3,16 +3,24 @@
 #include <R_ext/Rdynload.h>
 #include <R_ext/Altrep.h>
 
+#define SIMPLEMMAP
 
 /**
  ** Memory Mapped Vectors
  **/
 
+/* For now, this code is designed to work both in base R and in a
+   package. Some simplifications would be possible if it was only to
+   be used in base. in particular, the issue of finalizing objects
+   before unloading the library would not need to be addressed, and
+   ordinary finalizers in the external pointers could be used instead
+   of maintaining a weak reference list of the live mmap objects. */
+
 /*
  * MMAP Object State
  */
 
-/* State is hald in a LISTSXP of length 3, and includes
+/* State is held in a LISTSXP of length 3, and includes
    
        file
        size and length in a REALSXP
@@ -127,6 +135,11 @@ static SEXP mmap_list = NULL;
 static void mmap_finalize(SEXP eptr);
 static void register_mmap_eptr(SEXP eptr)
 {
+    if (mmap_list == NULL) {
+	mmap_list = CONS(R_NilValue, R_NilValue);
+	R_PreserveObject(mmap_list);
+    }
+    
     /* clean out the weak list every MAXCOUNT calls*/
     static int cleancount = MAXCOUNT;
     if (--cleancount <= 0) {
@@ -149,13 +162,18 @@ static void register_mmap_eptr(SEXP eptr)
     R_SetExternalPtrTag(eptr, CAR(CDR(mmap_list)));
 }
 
+#ifdef SIMPLEMMAP
 static void finalize_mmap_objects()
 {
+    if (mmap_list == NULL)
+	return;
+    
     /* finalize any remaining mmap objects before unloading */
     for (SEXP next = CDR(mmap_list); next != R_NilValue; next = CDR(next))
 	R_RunWeakRefFinalizer(CAR(next));
     R_ReleaseObject(mmap_list);
 }
+#endif
 
 
 /*
@@ -284,10 +302,16 @@ R_xlen_t mmap_real_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, double *buf)
  * Class Objects and Method Tables
  */
 
+#ifdef SIMPLEMMAP
+# define MMAPPKG "simplemmap"
+#else
+# define MMAPPKG "base"
+#endif
+
 static void InitMmapIntegerClass(DllInfo *info)
 {
     R_altrep_class_t cls =
-	R_make_altinteger_class("mmap_integer", "simplemmap", info);
+	R_make_altinteger_class("mmap_integer", MMAPPKG, info);
     mmap_integer_class = cls;
  
     /* override ALTREP methods */
@@ -308,7 +332,7 @@ static void InitMmapIntegerClass(DllInfo *info)
 static void InitMmapRealClass(DllInfo *info)
 {
     R_altrep_class_t cls =
-	R_make_altreal_class("mmap_real", "simplemmap", info);
+	R_make_altreal_class("mmap_real", MMAPPKG, info);
     mmap_real_class = cls;
 
     /* override ALTREP methods */
@@ -402,15 +426,20 @@ static Rboolean asLogicalNA(SEXP x, Rboolean dflt)
     return val == NA_LOGICAL ? dflt : val;
 }
 
+#ifdef SIMPLEMMAP
 SEXP do_mmap_file(SEXP args)
 {
     args = CDR(args);
+#else
+SEXP attribute_hidden do_mmap_file(SEXP call, SEXP op, SEXP args, SEXP env)
+{
+#endif
     SEXP file = CAR(args);
     SEXP stype = CADR(args);
     SEXP sptrOK = CADDR(args);
     SEXP swrtOK = CADDDR(args);
 
-    int type = 0;
+    int type = REALSXP;
     if (stype != R_NilValue) {
 	const char *typestr = CHAR(asChar(stype));
 	if (strcmp(typestr, "double") == 0)
@@ -422,7 +451,7 @@ SEXP do_mmap_file(SEXP args)
 	    error("type '%s' is not supported", typestr);
     }    
 
-    Rboolean ptrOK = sptrOK == R_NilValue ? FALSE : asLogicalNA(sptrOK, FALSE);
+    Rboolean ptrOK = sptrOK == R_NilValue ? TRUE : asLogicalNA(sptrOK, FALSE);
     Rboolean wrtOK = swrtOK == R_NilValue ? FALSE : asLogicalNA(swrtOK, FALSE);
 
     if (TYPEOF(file) != STRSXP || LENGTH(file) != 1 || file == NA_STRING)
@@ -449,23 +478,20 @@ SEXP do_munmap_file(SEXP args)
 	error("munmap: %s", strerror(errno));
     return R_NilValue;
 }    
-	
-static const R_ExternalMethodDef ExtEntries[] = {
-    {"mmap_file", (DL_FUNC) &do_mmap_file, -1},
-    {"munmap_file", (DL_FUNC) &do_munmap_file, -1},
-    {NULL, NULL, 0}
-};
 
 
 /*
  * Shared Library Initialization and Finalization
  */
 
+static const R_ExternalMethodDef ExtEntries[] = {
+    {"mmap_file", (DL_FUNC) &do_mmap_file, -1},
+    {"munmap_file", (DL_FUNC) &do_munmap_file, -1},
+    {NULL, NULL, 0}
+};
+
 void R_init_simplemmap(DllInfo *info)
 {
-    mmap_list = CONS(R_NilValue, R_NilValue);
-    R_PreserveObject(mmap_list);
-    
     InitMmapIntegerClass(info);
     InitMmapRealClass(info);
 
