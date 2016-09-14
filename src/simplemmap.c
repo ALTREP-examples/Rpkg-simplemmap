@@ -313,10 +313,10 @@ R_xlen_t mmap_real_get_region(SEXP sx, R_xlen_t i, R_xlen_t n, double *buf)
 # define MMAPPKG "base"
 #endif
 
-static void InitMmapIntegerClass(DllInfo *info)
+static void InitMmapIntegerClass(DllInfo *dll)
 {
     R_altrep_class_t cls =
-	R_make_altinteger_class("mmap_integer", MMAPPKG, info);
+	R_make_altinteger_class("mmap_integer", MMAPPKG, dll);
     mmap_integer_class = cls;
  
     /* override ALTREP methods */
@@ -334,10 +334,10 @@ static void InitMmapIntegerClass(DllInfo *info)
     R_set_altinteger_get_region_method(cls, mmap_integer_get_region);
 }
 
-static void InitMmapRealClass(DllInfo *info)
+static void InitMmapRealClass(DllInfo *dll)
 {
     R_altrep_class_t cls =
-	R_make_altreal_class("mmap_real", MMAPPKG, info);
+	R_make_altreal_class("mmap_real", MMAPPKG, dll);
     mmap_real_class = cls;
 
     /* override ALTREP methods */
@@ -495,15 +495,15 @@ static const R_ExternalMethodDef ExtEntries[] = {
     {NULL, NULL, 0}
 };
 
-void R_init_simplemmap(DllInfo *info)
+void R_init_simplemmap(DllInfo *dll)
 {
-    InitMmapIntegerClass(info);
-    InitMmapRealClass(info);
+    InitMmapIntegerClass(dll);
+    InitMmapRealClass(dll);
 
-    R_registerRoutines(info, NULL, NULL, NULL, ExtEntries);
+    R_registerRoutines(dll, NULL, NULL, NULL, ExtEntries);
 }
 
-void R_unload_simplemmap(DllInfo *info)
+void R_unload_simplemmap(DllInfo *dll)
 {
     finalize_mmap_objects();
 }
