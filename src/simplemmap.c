@@ -465,7 +465,8 @@ SEXP attribute_hidden do_mmap_file(SEXP call, SEXP op, SEXP args, SEXP env)
     return mmap_file(file, type, ptrOK, wrtOK, FALSE);
 }
 
-SEXP do_munmap_file(SEXP args)
+#ifdef SIMPLEMMAP
+static SEXP do_munmap_file(SEXP args)
 {
     args = CDR(args);
     SEXP x = CAR(args);
@@ -482,7 +483,8 @@ SEXP do_munmap_file(SEXP args)
     if (errno)
 	error("munmap: %s", strerror(errno));
     return R_NilValue;
-}    
+}
+#endif
 
 
 /*
