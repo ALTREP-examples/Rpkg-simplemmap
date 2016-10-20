@@ -214,7 +214,7 @@ static SEXP mmap_Unserialize(SEXP class, SEXP state, SEXP attr)
 
     SEXP val = mmap_file(file, type, ptrOK, wrtOK, serOK, TRUE);
     if (val == NULL) {
-	/**** The attempt to memory map failed. Eventualy it would be
+	/**** The attempt to memory map failed. Eventually it would be
 	      good to have a mechanism to allow the user to try to
 	      resolve this.  For now, return a length zero vector with
 	      another warning. */
