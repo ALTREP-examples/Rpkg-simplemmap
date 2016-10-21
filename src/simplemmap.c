@@ -329,9 +329,9 @@ static void InitMmapIntegerClass(DllInfo *dll)
     R_set_altrep_Unserialize_method(cls, mmap_Unserialize);
     R_set_altrep_Serialized_state_method(cls, mmap_Serialized_state);
     R_set_altrep_Inspect_method(cls, mmap_Inspect);
+    R_set_altrep_Length_method(cls, mmap_Length);
 
     /* override ALTVEC methods */
-    R_set_altvec_Length_method(cls, mmap_Length);
     R_set_altvec_Dataptr_method(cls, mmap_Dataptr);
     R_set_altvec_Dataptr_or_null_method(cls, mmap_Dataptr_or_null);
 
@@ -350,9 +350,9 @@ static void InitMmapRealClass(DllInfo *dll)
     R_set_altrep_Unserialize_method(cls, mmap_Unserialize);
     R_set_altrep_Serialized_state_method(cls, mmap_Serialized_state);
     R_set_altrep_Inspect_method(cls, mmap_Inspect);
+    R_set_altrep_Length_method(cls, mmap_Length);
 
     /* override ALTVEC methods */
-    R_set_altvec_Length_method(cls, mmap_Length);
     R_set_altvec_Dataptr_method(cls, mmap_Dataptr);
     R_set_altvec_Dataptr_or_null_method(cls, mmap_Dataptr_or_null);
 
