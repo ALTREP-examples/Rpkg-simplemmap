@@ -245,7 +245,7 @@ static R_xlen_t mmap_Length(SEXP x)
     return MMAP_LENGTH(x);
 }
 
-static void *mmap_Dataptr(SEXP x)
+static void *mmap_Dataptr(SEXP x, Rboolean writeable)
 {
     /* get addr first to get error if the object has been unmapped */
     void *addr = MMAP_ADDR(x);
@@ -256,7 +256,7 @@ static void *mmap_Dataptr(SEXP x)
 	error("cannot access data pointer for this mmaped vector");
 }
 
-static void *mmap_Dataptr_or_null(SEXP x)
+static void *mmap_Dataptr_or_null(SEXP x, Rboolean writeable)
 {
     return MMAP_PTROK(x) ? MMAP_ADDR(x) : NULL;
 }
