@@ -191,7 +191,7 @@ static void finalize_mmap_objects()
 
 static SEXP mmap_Serialized_state(SEXP x)
 {
-    /* If serOK is false then serialize as a regular typed vector. If
+    /* If serOK is FALSE then serialize as a regular typed vector. If
        serOK is true, then serialize information to allow the mmap to
        be reconstructed. The original file name is serialized; it will
        be expanded again when unserializing, in a context where the
@@ -256,7 +256,7 @@ static void *mmap_Dataptr(SEXP x, Rboolean writeable)
 	error("cannot access data pointer for this mmaped vector");
 }
 
-static void *mmap_Dataptr_or_null(SEXP x, Rboolean writeable)
+static const void *mmap_Dataptr_or_null(SEXP x)
 {
     return MMAP_PTROK(x) ? MMAP_ADDR(x) : NULL;
 }
@@ -366,7 +366,16 @@ static void InitMmapRealClass(DllInfo *dll)
  */
 
 #ifdef Win32
-# error "I'm sure this needs adjusting for Windows, so punt for now."
+static void mmap_finalize(SEXP eptr)
+{
+    error("mmap objects not supported on Windows yet");
+}
+
+static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
+		      Rboolean serOK, Rboolean warn)
+{
+    error("mmap objects not supported on Windows yet");
+}
 #else
 /* derived from the example in
   https://www.safaribooksonline.com/library/view/linux-system-programming/0596009585/ch04s03.html */
@@ -405,7 +414,11 @@ static void mmap_finalize(SEXP eptr)
 static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
 		      Rboolean serOK, Rboolean warn)
 {
+#ifdef SIMPLEMMAP
     const char *efn = R_ExpandFileName(translateChar(STRING_ELT(file, 0)));
+#else
+    const char *efn = R_ExpandFileName(translateCharFP(STRING_ELT(file, 0)));
+#endif
     struct stat sb;
 
     /* Target not link */
