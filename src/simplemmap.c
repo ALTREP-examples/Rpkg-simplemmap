@@ -365,16 +365,152 @@ static void InitMmapRealClass(DllInfo *dll)
  * Constructor
  */
 
+//#define DEBUG_PRINT(x) REprintf(x);
+#define DEBUG_PRINT(x) do { } while (0)
+
+#define MMAP_FILE_WARNING_OR_ERROR(str, ...) do {   \
+    if (warn) {                 \
+        warning(str, __VA_ARGS__);          \
+        return NULL;                \
+    }                       \
+    else error(str, __VA_ARGS__);           \
+    } while (0)
+
 #ifdef Win32
+
+#include <windows.h>
+
 static void mmap_finalize(SEXP eptr)
 {
-    error("mmap objects not supported on Windows yet");
+    DEBUG_PRINT("finalizing ... ");
+    void *p = R_ExternalPtrAddr(eptr);
+    R_SetExternalPtrAddr(eptr, NULL);
+    if (p != NULL) {
+        UnmapViewOfFile(p); /* don't check for errors */
+        R_SetExternalPtrAddr(eptr, NULL);
+    }
+    DEBUG_PRINT("done\n");
 }
 
-static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
-		      Rboolean serOK, Rboolean warn)
+#ifdef SIMPLEMMAP
+const char *formatError(DWORD res)
 {
-    error("mmap objects not supported on Windows yet");
+    static char buf[1000], *p;
+    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+		  NULL, res,
+		  MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		  buf, 1000, NULL);
+    p = buf+strlen(buf) -1;
+    if(*p == '\n') *p = '\0';
+    p = buf+strlen(buf) -1;
+    if(*p == '\r') *p = '\0';
+    p = buf+strlen(buf) -1;
+    if(*p == '.') *p = '\0';
+    return buf;
+}
+#else
+const char *formatError(DWORD res); /* extra.c */
+#endif
+
+#ifdef SIMPLEMMAP
+
+#include <R_ext/Riconv.h>
+
+/* Modified version of filenameToWchar in main/sysutils.c that converts to
+   UCS-2LE via UTF-8 to avoid missing encoding detection macros and gettext */
+#define BSIZE 100000
+wchar_t *filenameToWchar(const SEXP fn, const Rboolean expand)
+{
+    static wchar_t filename[BSIZE+1];
+    void *obj;
+    const char *from = "", *inbuf;
+    char *outbuf;
+    size_t inb, outb, res;
+
+    if(!strlen(CHAR(fn))) {
+	wcscpy(filename, L"");
+	return filename;
+    }
+    from = "UTF-8";
+    obj = Riconv_open("UCS-2LE", from);
+    if(obj == (void *)(-1))
+	error("unsupported conversion");
+
+    inbuf = translateCharUTF8(fn);
+    if(expand) inbuf = R_ExpandFileNameUTF8(inbuf);
+    inb = strlen(inbuf)+1; outb = 2*BSIZE;
+    outbuf = (char *) filename;
+    res = Riconv(obj, &inbuf , &inb, &outbuf, &outb);
+    Riconv_close(obj);
+    if(inb > 0) error("file name conversion problem -- name too long?");
+    if(res == -1) error("file name conversion problem");
+
+    return filename;
+}
+#endif
+
+static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
+                      Rboolean serOK, Rboolean warn)
+{
+    LPWSTR wfn = filenameToWchar(STRING_ELT(file, 0), 1);
+
+    /* Open file */
+    HANDLE hFile = CreateFileW(
+        wfn,
+        wrtOK ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
+        wrtOK ? FILE_SHARE_WRITE | FILE_SHARE_READ : FILE_SHARE_READ,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (hFile == INVALID_HANDLE_VALUE) {
+        MMAP_FILE_WARNING_OR_ERROR("CreateFileW: %s",
+            formatError(GetLastError()));
+    }
+
+    /* Get file length */
+    LARGE_INTEGER fileSize;
+    if (GetFileSizeEx(hFile, &fileSize) == 0) {
+        CloseHandle(hFile); /* don't check for errors */
+        MMAP_FILE_WARNING_OR_ERROR("GetFileSizeEx: %s",
+            formatError(GetLastError()));
+    }
+
+    /* Create file mapping */
+    HANDLE hMem = CreateFileMappingW(
+        hFile,
+        NULL,
+        wrtOK ? PAGE_READWRITE : PAGE_READONLY,
+        0,
+        0,
+        NULL
+    );
+    if (hMem == NULL) {
+        CloseHandle(hFile); /* don't check for errors */
+        MMAP_FILE_WARNING_OR_ERROR("CreateFileMappingW: %s",
+            formatError(GetLastError()));
+    }
+
+    /* Map file into memory */
+    void *p = MapViewOfFile(
+        hMem,
+        wrtOK ? FILE_MAP_WRITE | FILE_MAP_READ : FILE_MAP_READ,
+        0,
+        0,
+        0
+    );
+    if (p == NULL) {
+        CloseHandle(hMem); /* don't check for errors */
+        CloseHandle(hFile); /* don't check for errors */
+        MMAP_FILE_WARNING_OR_ERROR("MapViewOfFile: %s",
+            formatError(GetLastError()));
+    }
+
+    CloseHandle(hMem); /* don't check for errors */
+    CloseHandle(hFile); /* don't check for errors */
+
+    return make_mmap(p, file, fileSize.QuadPart, type, ptrOK, wrtOK, serOK);
 }
 #else
 /* derived from the example in
@@ -385,9 +521,6 @@ static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
-
-//#define DEBUG_PRINT(x) REprintf(x);
-#define DEBUG_PRINT(x) do { } while (0)
 
 static void mmap_finalize(SEXP eptr)
 {
@@ -403,14 +536,6 @@ static void mmap_finalize(SEXP eptr)
     DEBUG_PRINT("done\n");
 }
 
-#define MMAP_FILE_WARNING_OR_ERROR(str, ...) do {	\
-	if (warn) {					\
-	    warning(str, __VA_ARGS__);			\
-	    return NULL;				\
-	}						\
-	else error(str, __VA_ARGS__);			\
-    } while (0)
-	    
 static SEXP mmap_file(SEXP file, int type, Rboolean ptrOK, Rboolean wrtOK,
 		      Rboolean serOK, Rboolean warn)
 {
